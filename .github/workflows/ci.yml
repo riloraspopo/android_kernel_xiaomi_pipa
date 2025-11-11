@@ -9,23 +9,22 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Install ARM toolchain dependencies
+      - name: Install toolchains
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             gcc-aarch64-linux-gnu \
             binutils-aarch64-linux-gnu \
-            gcc-arm-linux-gnueabi \
-            binutils-arm-linux-gnueabi \
             bc bison flex libssl-dev make \
             build-essential git
 
-      - name: Build Kernel
+      - name: Build
         uses: dabao1955/kernel_build_action@main
         with:
           kernel-url: https://github.com/riloraspopo/android_kernel_xiaomi_pipa
           config: defconfig
           arch: arm64
+          abi: arm64
           android-version: 16
           ksu: true
-          abi: arm64
+          skip-install: true
