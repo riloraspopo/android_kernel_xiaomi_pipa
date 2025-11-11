@@ -1,50 +1,66 @@
-name: Build
+name: Manual Kernel Build - Xiaomi Pad 6 (pipa) with KernelSU
 
 on:
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build:
-    runs-on: ubuntu-24.04
-    concurrency:
-      group: ${{ github.repository_owner }}
-    container:
-     image: pexcn/docker-images:bookworm-android
-    env:
-      TZ: Asia/Taipei
-      TOOLCHAIN_URL: https://github.com/ZyCromerZ/Clang/releases/download/21.0.0git-20250531-release/Clang-21.0.0git-20250531.tar.gz
-      #CONFIG: ${{ matrix.CONFIG }}
-    #strategy:
-    #  fail-fast: false
-    #  matrix:
-    #    CONFIG:
-    #      - aosp
-    #      - miui
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
+    - name: Checkout kernel source
+      uses: actions/checkout@v4
+      with:
+        submodules: true
 
-      - name: Make build cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/ccache
-          key: pipa-kernel-${{ github.sha }}
-          restore-keys: pipa-kernel-
+    - name: Install build dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y \
+          bc make gcc g++ binutils bison flex perl \
+          libssl-dev libelf-dev openssl \
+          python3 python3-distutils \
+          ccache rsync git 
 
-      - name: Prepare toolchain
-        run: |
-          mkdir toolchain
-          curl -L $TOOLCHAIN_URL | tar -zxf - -C toolchain
-      - name: Build kernel
-        run: ./build.sh $(readlink -f toolchain)
+    - name: Download Google's Prebuilt Clang
+      run: |
+        mkdir -p prebuilts/clang
+        cd prebuilts/clang
+        git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
+          --depth=1 -b master
+        cd ../..
 
-      - name: Upload to artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: pipa-kernel
-          path: Kernel_BloodReaper*.zip
+    - name: Clone KernelSU
+      run: |
+        git clone https://github.com/tiann/KernelSU.git KernelSU
+
+    - name: Export environment
+      run: |
+        echo "PATH=$PWD/prebuilts/clang/host/linux-x86/clang-*/bin:$PATH" >> $GITHUB_ENV
+        echo "ARCH=arm64" >> $GITHUB_ENV
+        echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
+
+    - name: Apply KernelSU Patch
+      run: |
+        cd KernelSU
+        bash scripts/apply_patch.sh ../
+        cd ..
+
+    - name: Configure kernel (pipa)
+      run: |
+        make O=out vendor/pipa_defconfig
+        echo "CONFIG_KSU=y" >> out/.config
+
+    - name: Build kernel
+      run: |
+        make -j$(nproc) O=out
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-build-pipa
+        path: |
+          out/arch/arm64/boot/Image
+          out/arch/arm64/boot/dts/
+          out/modules.builtin
+          out/System.map
