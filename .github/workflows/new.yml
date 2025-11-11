@@ -1,0 +1,58 @@
+name: Manual Kernel Build - Pipa KSUNext
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout kernel source
+      uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: Install build dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y \
+          bc make gcc g++ binutils bison flex perl \
+          libssl-dev libelf-dev openssl \
+          ccache rsync git
+
+    - name: Download Google's Prebuilt Clang
+      run: |
+        mkdir -p prebuilts/clang
+        cd prebuilts/clang
+        git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
+          --depth=1 -b master
+        cd ../..
+
+    - name: Export environment
+      run: |
+        echo "PATH=$PWD/prebuilts/clang/host/linux-x86/clang-*/bin:$PATH" >> $GITHUB_ENV
+        echo "ARCH=arm64" >> $GITHUB_ENV
+        echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
+
+    - name: Configure kernel
+      run: |
+        make O=out vendor/pipa_defconfig
+        echo "CONFIG_KSU=y" >> out/.config
+        echo "CONFIG_KSU_NEXT=y" >> out/.config
+        echo "CONFIG_KSU_SUSFS=y" >> out/.config
+        echo "CONFIG_KSU_DEBUG=n" >> out/.config
+
+    - name: Build kernel
+      run: |
+        make -j$(nproc) O=out
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-build-pipa-ksunext
+        path: |
+          out/arch/arm64/boot/Image
+          out/arch/arm64/boot/dts/
+          out/modules.builtin
+          out/System.map
