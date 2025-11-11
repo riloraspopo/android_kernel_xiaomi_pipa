@@ -9,16 +9,16 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Install toolchains
+      - name: Install needed toolchains
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             gcc-aarch64-linux-gnu \
             binutils-aarch64-linux-gnu \
             bc bison flex libssl-dev make \
-            build-essential git
+            build-essential git ccache
 
-      - name: Build
+      - name: Build Kernel
         uses: dabao1955/kernel_build_action@main
         with:
           kernel-url: https://github.com/riloraspopo/android_kernel_xiaomi_pipa
