@@ -41,9 +41,9 @@ jobs:
 
     - name: Apply KernelSU Patch
       run: |
-        cd KernelSU
-        bash scripts/apply_patch.sh ../
-        cd ..
+        cd KernelSU/kernel
+        bash patches/apply.sh ../../
+        cd ../..
 
     - name: Configure kernel (pipa)
       run: |
