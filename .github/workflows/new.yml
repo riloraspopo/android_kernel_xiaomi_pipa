@@ -1,4 +1,4 @@
-name: Manual Kernel Build - Pipa KSUNext
+name: Manual Kernel Build - pipa (KSUNext builtin) + AnyKernel3 ZIP
 
 on:
   workflow_dispatch:
@@ -6,53 +6,113 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      ARCH: arm64
 
     steps:
-    - name: Checkout kernel source
-      uses: actions/checkout@v4
-      with:
-        submodules: true
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          submodules: true
 
-    - name: Install build dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y \
-          bc make gcc g++ binutils bison flex perl \
-          libssl-dev libelf-dev openssl \
-          ccache rsync git
+      - name: Install build deps
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            bc make gcc g++ binutils bison flex perl \
+            libssl-dev libelf-dev openssl \
+            ccache rsync git zip unzip
 
-    - name: Download Google's Prebuilt Clang
-      run: |
-        mkdir -p prebuilts/clang
-        cd prebuilts/clang
-        git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
-          --depth=1 -b master
-        cd ../..
+      - name: Download Android prebuilt Clang
+        run: |
+          mkdir -p prebuilts/clang
+          cd prebuilts/clang
+          git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
+            --depth=1 -b master
+          cd ../..
 
-    - name: Export environment
-      run: |
-        echo "PATH=$PWD/prebuilts/clang/host/linux-x86/clang-*/bin:$PATH" >> $GITHUB_ENV
-        echo "ARCH=arm64" >> $GITHUB_ENV
-        echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
+      - name: Export LLVM toolchain to PATH
+        run: |
+          echo "PATH=$PWD/prebuilts/clang/host/linux-x86/clang-*/bin:$PATH" >> $GITHUB_ENV
+          # Confirm clang exists
+          ls -l prebuilts/clang/host/linux-x86 || true
 
-    - name: Configure kernel
-      run: |
-        make O=out vendor/pipa_defconfig
-        echo "CONFIG_KSU=y" >> out/.config
-        echo "CONFIG_KSU_NEXT=y" >> out/.config
-        echo "CONFIG_KSU_SUSFS=y" >> out/.config
-        echo "CONFIG_KSU_DEBUG=n" >> out/.config
+      - name: Configure kernel (vendor pipa defconfig)
+        run: |
+          # create build directory if absent and run defconfig
+          make O=out vendor/pipa_defconfig
 
-    - name: Build kernel
-      run: |
-        make -j$(nproc) O=out
+          # enable KSUNext built-in flags, then refresh config
+          echo "CONFIG_KSU=y" >> out/.config
+          echo "CONFIG_KSU_NEXT=y" >> out/.config
+          echo "CONFIG_KSU_SUSFS=y" >> out/.config
+          echo "CONFIG_KSU_DEBUG=n" >> out/.config
 
-    - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: kernel-build-pipa-ksunext
-        path: |
-          out/arch/arm64/boot/Image
-          out/arch/arm64/boot/dts/
-          out/modules.builtin
-          out/System.map
+          # ensure new options are applied
+          make O=out olddefconfig
+
+      - name: Build kernel (Clang / LLVM)
+        run: |
+          # Use Android prebuilt clang (LLVM) for cross-building
+          export CC=clang
+          export LLVM=1
+          export LLVM_IAS=1
+          export PATH=$PWD/prebuilts/clang/host/linux-x86/clang-*/bin:$PATH
+
+          # parallel build
+          make -j$(nproc) O=out
+
+      - name: Collect kernel outputs
+        run: |
+          mkdir -p release
+          # Image, dtbs, modules if any
+          cp -v out/arch/arm64/boot/Image release/ || true
+          cp -v out/arch/arm64/boot/dts/* release/ 2>/dev/null || true
+          cp -v out/arch/arm64/boot/dtbo.img release/ 2>/dev/null || true
+          cp -v out/System.map release/ 2>/dev/null || true
+
+      - name: Prepare AnyKernel3 tree & build flashable ZIP
+        run: |
+          # Grab a known AnyKernel3 template (forkless, small)
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3 || \
+            git clone --depth=1 https://github.com/TeamWin/AnyKernel3.git AnyKernel3
+
+          # copy kernel Image and dtbs into AnyKernel3, and prepare updater
+          KROOT="$PWD"
+          AKROOT="$PWD/AnyKernel3"
+          mkdir -p $AKROOT/kernel
+          cp -v release/Image $AKROOT/kernel/Image || cp -v release/Image.gz $AKROOT/kernel/Image || true
+
+          # copy dtb(s)
+          mkdir -p $AKROOT/dtb
+          cp -v release/*.dtb $AKROOT/dtb/ 2>/dev/null || true
+          [ -f release/dtbo.img ] && cp -v release/dtbo.img $AKROOT/kernel/dtbo.img || true
+
+          # create a simple zip name and meta
+          cd $AKROOT
+          # If AnyKernel3 expects a specific filename, supply a generic updater-script that flashes Image + dtbs.
+          # We'll include a small custom updater-script if none exists.
+          if [ ! -f updater-script ]; then
+            cat > updater-script <<'EOF'
+ui_print("Flashing pipa kernel (AnyKernel3)...");
+# Flash kernel Image
+package_extract_file("kernel/Image","/tmp/Image");
+run_program("/sbin/sh","-c","if [ -f /tmp/Image ]; then dd if=/tmp/Image of=/dev/block/by-name/kernel; fi");
+# Flash dtbs if present (example - adapt if your device uses dtbo/dtb partitions)
+if [ file_getprop("/tmp","has_dtbs") != "" ]; then
+  ui_print("DTBs present");
+fi
+ui_print("Done");
+EOF
+          fi
+
+          # Ensure zip contains kernel payload
+          zip -r ../anykernel_pipa.zip . -x .git\* || true
+          mv ../anykernel_pipa.zip "$KROOT/release/anykernel_pipa.zip"
+          cd "$KROOT"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipa-kernel-anykernel
+          path: release/
