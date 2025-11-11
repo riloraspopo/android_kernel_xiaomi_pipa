@@ -94,16 +94,16 @@ jobs:
           # We'll include a small custom updater-script if none exists.
           if [ ! -f updater-script ]; then
             cat > updater-script <<'EOF'
-ui_print("Flashing pipa kernel (AnyKernel3)...");
-# Flash kernel Image
-package_extract_file("kernel/Image","/tmp/Image");
-run_program("/sbin/sh","-c","if [ -f /tmp/Image ]; then dd if=/tmp/Image of=/dev/block/by-name/kernel; fi");
-# Flash dtbs if present (example - adapt if your device uses dtbo/dtb partitions)
-if [ file_getprop("/tmp","has_dtbs") != "" ]; then
-  ui_print("DTBs present");
-fi
-ui_print("Done");
-EOF
+            ui_print("Flashing pipa kernel (AnyKernel3)...");
+            # Flash kernel Image
+            package_extract_file("kernel/Image","/tmp/Image");
+            run_program("/sbin/sh","-c","if [ -f /tmp/Image ]; then dd if=/tmp/Image of=/dev/block/by-name/kernel; fi");
+            # Flash dtbs if present (example - adapt if your device uses dtbo/dtb partitions)
+            if [ file_getprop("/tmp","has_dtbs") != "" ]; then
+              ui_print("DTBs present");
+            fi
+            ui_print("Done");
+            EOF
           fi
 
           # Ensure zip contains kernel payload
